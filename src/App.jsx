@@ -3,6 +3,8 @@ import YouTube from "react-youtube";
 import { scroller, Element } from "react-scroll";
 import "./App.css";
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+
 const App = () => {
   const [videoUrl, setVideoUrl] = useState("");
   const [videoId, setVideoId] = useState("");
@@ -51,7 +53,7 @@ const App = () => {
     setRepeatSegment(null);
     
     try {
-      const response = await fetch('http://localhost:8000/transcript', {
+      const response = await fetch(`${BACKEND_URL}/transcript`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
