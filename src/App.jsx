@@ -286,85 +286,93 @@ const App = () => {
       </div>
 
       <div className="content">
-        {videoId && (
-          <div className="video-section">
-            <h2>Video</h2>
-            <YouTube
-              videoId={videoId}
-              onReady={onReady}
-              onStateChange={onStateChange}
-              opts={{ 
-                playerVars: { 
-                  autoplay: 1, 
-                  controls: 1,
-                  modestbranding: 1,
-                  rel: 0
-                } 
-              }}
-              className="youtube-player"
-            />
-            <div className="player-controls">
-              <button 
-                onClick={toggleRepeat} 
-                className={`control-button ${isRepeating ? 'active' : ''}`}
-              >
-                {isRepeating ? "Tắt lặp lại" : "Bật lặp lại"} 
-              </button>
-              <button 
-                onClick={toggleAutoScroll} 
-                className={`control-button ${autoScroll ? 'active' : ''}`}
-              >
-                {autoScroll ? "Tắt tự động cuộn" : "Bật tự động cuộn"}
-              </button>
-            </div>
-            {isRepeating && repeatSegment && (
-              <div className="repeat-info">
-                Đang lặp lại: "{repeatSegment.english}"
+        {/* Luôn hiển thị video section, ẩn chỉ nội dung bên trong */}
+        <div className="video-section">
+          <h2>Video</h2>
+          
+          {videoId ? (
+            <div className="video-wrapper">
+              <YouTube
+                videoId={videoId}
+                onReady={onReady}
+                onStateChange={onStateChange}
+                opts={{ 
+                  playerVars: { 
+                    autoplay: 1, 
+                    controls: 1,
+                    modestbranding: 1,
+                    rel: 0
+                  } 
+                }}
+                className="youtube-player"
+              />
+              <div className="player-controls">
+                <button 
+                  onClick={toggleRepeat} 
+                  className={`control-button ${isRepeating ? 'active' : ''}`}
+                >
+                  {isRepeating ? "Tắt lặp lại" : "Bật lặp lại"} 
+                </button>
+                <button 
+                  onClick={toggleAutoScroll} 
+                  className={`control-button ${autoScroll ? 'active' : ''}`}
+                >
+                  {autoScroll ? "Tắt tự động cuộn" : "Bật tự động cuộn"}
+                </button>
               </div>
-            )}
-          </div>
-        )}
+              {isRepeating && repeatSegment && (
+                <div className="repeat-info">
+                  Đang lặp lại: "{repeatSegment.english}"
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="placeholder-message">
+              Chưa có phụ đề hoặc URL video chưa được nhập
+            </div>
+          )}
+        </div>
 
         <div className="captions-section">
           <h2>Phụ đề</h2>
           
-          {isLoading && (
+          {isLoading ? (
             <div className="loading-indicator">
               <p>Đang tải phụ đề, vui lòng đợi...</p>
             </div>
-          )}
-          
-          {error && (
+          ) : error ? (
             <div className="error-message">
               <p>{error}</p>
             </div>
+          ) : captions.length === 0 ? (
+            <div className="placeholder-message">
+              <p>
+                Nhập URL video YouTube và nhấn "Lấy phụ đề" để bắt đầu
+              </p>
+            </div>
+          ) : (
+            <Element 
+              id="captions-container" 
+              className="captions-container" 
+              name="captions-container"
+              ref={captionsContainerRef}
+            >
+              {captions.map((caption, index) => (
+                <Element
+                  key={index}
+                  name={`caption-${index}`}
+                  className={`caption ${index === currentCaptionIndex ? "active" : ""}`}
+                  onClick={() => handleCaptionClick(caption, index)}
+                >
+                  <div className="caption-header">
+                    <span className="caption-time">{formatTime(caption.start)}</span>
+                  </div>
+                  <p className="caption-english">{caption.english}</p>
+                  <p className="caption-vietnamese">{caption.vietnamese}</p>
+                </Element>
+              ))}
+            </Element>
           )}
-          
-          {!isLoading && !error && captions.length === 0 && (
-            <p>Chưa có phụ đề hoặc URL video chưa được nhập</p>
-          )}
-          
-          <Element 
-            id="captions-container" 
-            className="captions-container" 
-            name="captions-container"
-            ref={captionsContainerRef}
-          >
-            {captions.map((caption, index) => (
-              <Element
-                key={index}
-                name={`caption-${index}`}
-                className={`caption ${index === currentCaptionIndex ? "active" : ""}`}
-                onClick={() => handleCaptionClick(caption, index)}
-              >
-                <div className="caption-header">
-                  <span className="caption-time">{formatTime(caption.start)}</span>
-                </div>
-                <p className="caption-english">{caption.english}</p>
-                <p className="caption-vietnamese">{caption.vietnamese}</p>
-              </Element>
-            ))}
-          </Element>
         </div>
       </div>
     </div>
