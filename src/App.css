@@ -464,229 +464,35 @@
   }
 }
 
-/* Responsive Design */
-
-/* Breakpoint variables */
-:root {
-  --mobile-small: 320px;
-  --mobile-medium: 375px;
-  --mobile-large: 425px;
-  --tablet: 768px;
-  --desktop: 1024px;
-}
-
-/* Base Responsive Styles */
-@media (max-width: 768px) {
+/* Responsive for Mobile (iPhone 13 and similar) */
+@media (max-width: 390px) {
   .container {
-    padding: 15px 10px;
-    max-width: 100%;
-    margin: 0;
+    padding: 10px;
   }
-
+  
   .content {
     flex-direction: column;
-    gap: 15px;
   }
-
-  .input-section {
-    padding: 10px;
-  }
-
-  .input-section h1 {
-    font-size: 20px;
-  }
-
-  .url-input {
+  
+  .captions-section, .video-section {
     width: 100%;
-    margin-right: 0;
-    margin-bottom: 10px;
-    font-size: 14px;
-    padding: 10px;
-  }
-
-  .submit-button {
-    width: 100%;
-    padding: 10px;
-    font-size: 14px;
-  }
-
-  .video-section, 
-  .captions-section {
-    width: 100%;
-    min-height: 350px;
-  }
-
-  .youtube-player {
-    height: 250px;
-  }
-
-  .captions-container {
-    max-height: 45vh;
-    height: 300px;
-  }
-
-  .player-controls {
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .control-button {
-    width: 90%;
-  }
-
-  .repeat-info {
-    max-width: 95%;
-    width: 95%;
-    font-size: 0.9em;
-    padding: 6px 8px;
-  }
-}
-
-/* Mobile Small Devices (320px - 375px) */
-@media (max-width: 375px) {
-  .container {
-    padding: 10px 8px;
-  }
-
-  .content {
-    gap: 10px;
-  }
-
-  .captions-section {
-    order: 1;
-    width: 100%;
-    min-height: auto;
     height: auto;
     max-height: 50vh;
   }
-
-  .captions-container {
-    max-height: 45vh;
-    height: 350px;
-    padding-right: 5px;
-  }
-
-  .video-section {
-    order: 2;
-    width: 100%;
-    min-height: auto;
-    height: auto;
-    max-height: 40vh;
-  }
-
+  
   .youtube-player {
     width: 100%;
-    height: 220px;
-    max-height: 250px;
+    max-height: 220px;
   }
-
-  .video-section h2,
-  .captions-section h2 {
-    font-size: 18px;
-    padding-bottom: 5px;
-  }
-
-  .caption {
+  
+  .url-input, .submit-button {
+    width: 100%;
+    font-size: 14px;
     padding: 10px;
-    margin-bottom: 10px;
   }
-
-  .caption-time {
-    font-size: 0.75em;
-  }
-
-  .caption-english {
-    font-size: 0.9em;
-  }
-
-  .caption-vietnamese {
-    font-size: 0.8em;
-  }
-}
-
-/* Tablet Specific Adjustments */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .container {
-    padding: 20px;
-  }
-
-  .content {
-    flex-direction: column;
-  }
-
-  .video-section, 
-  .captions-section {
-    width: 100%;
-    min-height: 400px;
-  }
-
-  .youtube-player {
-    max-height: 450px;
-  }
-
-  .captions-container {
-    max-height: 50vh;
-  }
-}
-
-/* Large Desktop Adjustments */
-@media (min-width: 1025px) {
-  .container {
-    max-width: 1200px;
-    margin: 0 auto;
-  }
-
-  .content {
-    gap: 30px;
-  }
-
-  .video-section, 
-  .captions-section {
-    min-height: 600px;
-  }
-}
-
-/* Print Styles */
-@media print {
-  .container {
-    background-color: white;
-    color: black;
-  }
-
-  .input-section,
+  
   .player-controls {
-    display: none;
-  }
-
-  .captions-section,
-  .video-section {
-    border: 1px solid #000;
-    page-break-inside: avoid;
-  }
-}
-
-/* High Contrast Mode */
-@media (prefers-contrast: high) {
-  .container {
-    background-color: black;
-    color: white;
-  }
-
-  .video-section,
-  .captions-section {
-    border: 2px solid white;
-  }
-
-  .caption {
-    border: 1px solid white;
-  }
-}
-
-/* Reduce Motion */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation: none !important;
-    transition: none !important;
+    flex-direction: column;
+    gap: 10px;
   }
 }
