@@ -347,6 +347,13 @@ const App = () => {
     );
   }, [captions]);
 
+  const handleLesson = (url) => {
+    setVideoUrl(url);
+    const id = extractVideoId(url);
+    setVideoId(id);
+    getCaptions();
+  }
+
   return (
     <div className="container">
       <div className="input-section">
@@ -373,6 +380,14 @@ const App = () => {
         {/* Video section */}
         <div className="video-section">
           <h2>Video</h2>
+          <div>
+            <button onClick={() => handleLesson("https://www.youtube.com/watch?v=2f7ZhqYPl-0")}>Lesson: Level 1</button>
+            <button onClick={() => handleLesson("https://www.youtube.com/watch?v=w2qNbNxEbhg")}>Lesson: Level 2</button>
+            <button onClick={() => handleLesson("https://www.youtube.com/watch?v=tMKFLLyfonk")}>Lesson: Level 3</button>
+            <button onClick={() => window.open("https://drive.google.com/file/d/0B-hTIM3aG_oJOVhCLUNSU1lxN00/edit?pref=2&pli=1&resourcekey=0-nNY5G_suRKyihly635uwwA", "_blank")}>
+              Tài liệu TOEIC
+            </button>
+          </div>
           
           {videoId ? (
             <div className="video-wrapper">
@@ -417,6 +432,7 @@ const App = () => {
               Chưa có phụ đề hoặc URL video chưa được nhập
             </div>
           )}
+          
         </div>
 
         <div className="captions-section">
