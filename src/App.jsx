@@ -1,12 +1,12 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import YouTube from "react-youtube";
 import { scroller, Element } from "react-scroll";
 import "./App.css";
 
-// const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 const BACKEND_URL = "http://localhost:8000";
 
 const App = () => {
+  // State management
   const [videoUrl, setVideoUrl] = useState("");
   const [videoId, setVideoId] = useState("");
   const [captions, setCaptions] = useState([]);
@@ -18,7 +18,12 @@ const App = () => {
   const [repeatSegment, setRepeatSegment] = useState(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [userScrolling, setUserScrolling] = useState(false);
+  const [selectedLanguages, setSelectedLanguages] = useState({
+    primary: 'english',
+    secondary: 'vietnamese'
+  });
   
+  // Refs
   const playerRef = useRef(null);
   const intervalRef = useRef(null);
   const isSeekingRef = useRef(false);
@@ -30,23 +35,24 @@ const App = () => {
   const extractVideoId = (url) => {
     if (!url) return "";
     
-    // Regular expression to extract YouTube video ID
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = url.match(regExp);
     
     return (match && match[2].length === 11) ? match[2] : "";
   };
 
-  // Process URL input
+  // Process URL input with debounce
   const handleUrlChange = (e) => {
     const url = e.target.value;
     setVideoUrl(url);
+    
+    // Extract ID immediately for better UX
     const id = extractVideoId(url);
     setVideoId(id);
   };
 
-  // Fetch transcript from backend API
-  const getTranscript = async () => {
+  // Fetch captions from backend API
+  const getCaptions = async () => {
     if (!videoId) {
       setError("Vui lòng nhập URL YouTube hợp lệ");
       return;
@@ -60,16 +66,17 @@ const App = () => {
     repeatSegmentIndexRef.current = -1;
     
     try {
-      const response = await fetch(`${BACKEND_URL}/transcript`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url: videoUrl }),
-      });
+      // Updated to match your backend structure - using /captions endpoint
+      const response = await fetch(`${BACKEND_URL}/captions?videoId=${videoId}`);
       
       if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
+        if (response.status === 404) {
+          throw new Error("Không tìm thấy phụ đề cho video này");
+        } else if (response.status === 403) {
+          throw new Error("Không có quyền truy cập video này");
+        } else {
+          throw new Error(`Lỗi máy chủ: ${response.status}`);
+        }
       }
       
       const data = await response.json();
@@ -87,29 +94,38 @@ const App = () => {
     }
   };
 
-  // Update time more accurately
+  // Initialize player and time tracking
   const onReady = (event) => {
     playerRef.current = event.target;
 
-    if (!intervalRef.current) {
-      intervalRef.current = setInterval(() => {
-        if (playerRef.current && !isSeekingRef.current) {
-          const exactTime = playerRef.current.getCurrentTime();
-          setCurrentTime(exactTime);
-        }
-      }, 100); // 100ms for smoother updates
+    // Clear existing interval if any
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
     }
+
+    // Set up new interval
+    intervalRef.current = setInterval(() => {
+      if (playerRef.current && !isSeekingRef.current) {
+        const exactTime = playerRef.current.getCurrentTime();
+        setCurrentTime(exactTime);
+      }
+    }, 100);
   };
 
   // Handle player state changes
   const onStateChange = (event) => {
     if (event.data === YouTube.PlayerState.PAUSED && isRepeating && repeatSegment) {
-      // Check if user really wanted to pause the video
+      // Small delay to check if pause was intentional
       setTimeout(() => {
+        if (!playerRef.current) return;
+        
         if (playerRef.current.getPlayerState() === YouTube.PlayerState.PAUSED) {
-          setIsRepeating(false); // Turn off repeat mode if user paused the video
+          // User intentionally paused, so disable repeat
+          setIsRepeating(false);
           repeatSegmentIndexRef.current = -1;
+          setRepeatSegment(null);
         } else {
+          // Auto-pause from repeat, so continue repeating
           playerRef.current.seekTo(repeatSegment.start, true);
           playerRef.current.playVideo();
         }
@@ -117,30 +133,31 @@ const App = () => {
     }
   };
   
-  // Scroll to the active caption, modified to respect repeating segment
-  const scrollToActiveCaption = (index) => {
-    // Only scroll when not in repeat mode or if in repeat mode, index matches repeatSegmentIndex
-    if (index >= 0 && autoScroll && !userScrolling && 
-        (!isRepeating || (isRepeating && index === repeatSegmentIndexRef.current))) {
-      
-      // Clear any existing timeout
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      
-      scroller.scrollTo(`caption-${index}`, {
-        duration: 500,
-        delay: 0,
-        smooth: 'easeInOutQuart',
-        containerId: 'captions-container',
-        offset: -80
-      });
+  // Enhanced scroll to caption
+  const scrollToActiveCaption = useCallback((index) => {
+    if (index < 0 || !autoScroll || userScrolling) return;
+    
+    // Only scroll in repeat mode if index matches the repeating segment
+    if (isRepeating && index !== repeatSegmentIndexRef.current) return;
+    
+    // Clear any existing scroll timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
     }
-  };
+    
+    // Use react-scroll for smooth scrolling
+    scroller.scrollTo(`caption-${index}`, {
+      duration: 500,
+      delay: 0,
+      smooth: 'easeInOutQuart',
+      containerId: 'captions-container',
+      offset: -80
+    });
+  }, [autoScroll, userScrolling, isRepeating]);
 
-  // Update current caption based on playback time
+  // Update current caption based on video time
   useEffect(() => {
-    if (!captions.length || isSeekingRef.current) return;
+    if (!captions.length || isSeekingRef.current || !playerRef.current) return;
 
     const index = captions.findIndex(
       (caption) =>
@@ -148,9 +165,9 @@ const App = () => {
         currentTime < caption.start + caption.duration
     );
 
-    // Update current caption only when not in repeat mode
-    // Or if in repeat mode, only update when index matches repeatSegmentIndex
+    // Update current caption based on time
     if (index !== -1 && index !== currentCaptionIndex) {
+      // Only update if not in repeat mode or if in repeat mode and this is the repeating segment
       if (!isRepeating || (isRepeating && index === repeatSegmentIndexRef.current)) {
         setCurrentCaptionIndex(index);
         
@@ -160,30 +177,38 @@ const App = () => {
       }
     }
 
-    // Handle repeat functionality
+    // Handle repeating logic
     if (isRepeating && repeatSegment) {
       const repeatEnd = repeatSegment.start + repeatSegment.duration;
-      if (currentTime >= repeatEnd) {
+      // Add a small buffer (0.1s) to prevent edge case issues
+      if (currentTime >= repeatEnd - 0.1) {
         playerRef.current.seekTo(repeatSegment.start, true);
       }
     }
-  }, [currentTime, captions, currentCaptionIndex, isRepeating, repeatSegment, autoScroll, userScrolling]);
+  }, [
+    currentTime, 
+    captions, 
+    currentCaptionIndex, 
+    isRepeating, 
+    repeatSegment, 
+    autoScroll, 
+    userScrolling, 
+    scrollToActiveCaption
+  ]);
 
-  // Handle user scrolling detection
+  // Detect user scrolling to pause auto-scroll
   useEffect(() => {
     const container = document.getElementById('captions-container');
     if (!container) return;
 
     const handleScroll = () => {
-      // Set user scrolling to true
       setUserScrolling(true);
       
-      // Clear previous timeout if exists
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
       
-      // Reset user scrolling after a delay (2 seconds)
+      // Reset user scrolling flag after 2 seconds of inactivity
       scrollTimeoutRef.current = setTimeout(() => {
         setUserScrolling(false);
       }, 2000);
@@ -199,94 +224,153 @@ const App = () => {
     };
   }, []);
 
-  // Handle caption click - seek to that time and enable repeating
-  const handleCaptionClick = (caption, index) => {
-    if (playerRef.current) {
-      isSeekingRef.current = true;
-      
-      // Set repeating for this segment
-      setIsRepeating(true);
-      setRepeatSegment(caption);
-      setCurrentCaptionIndex(index);
-      repeatSegmentIndexRef.current = index; // Store the index of the repeating segment
-      
-      // Seek to the beginning of the segment with exact timing
-      playerRef.current.seekTo(caption.start, true);
-      playerRef.current.playVideo();
-      
-      // Scroll to the selected segment
-      if (autoScroll) {
-        scrollToActiveCaption(index);
-      }
-      
-      setTimeout(() => {
-        isSeekingRef.current = false;
-      }, 300);
+  // Handle caption click to enable repeating mode
+  const handleCaptionClick = useCallback((caption, index) => {
+    if (!playerRef.current) return;
+    
+    isSeekingRef.current = true;
+    
+    // Enable repeating for this segment
+    setIsRepeating(true);
+    setRepeatSegment(caption);
+    setCurrentCaptionIndex(index);
+    repeatSegmentIndexRef.current = index;
+    
+    // Seek to the beginning of the segment
+    playerRef.current.seekTo(caption.start, true);
+    playerRef.current.playVideo();
+    
+    // Scroll to the selected segment if auto-scroll is enabled
+    if (autoScroll) {
+      scrollToActiveCaption(index);
     }
-  };
+    
+    // Reset seeking flag after a short delay
+    setTimeout(() => {
+      isSeekingRef.current = false;
+    }, 300);
+  }, [playerRef, autoScroll, scrollToActiveCaption]);
 
   // Format time for display (seconds to MM:SS.MS)
   const formatTime = (seconds) => {
     const totalSeconds = Math.floor(seconds);
     const minutes = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
-    const ms = Math.floor((seconds - totalSeconds) * 10); // Get 1 decimal place
+    const ms = Math.floor((seconds - totalSeconds) * 10);
     
     return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`;
   };
 
   // Toggle repeat mode
-  const toggleRepeat = () => {
+  const toggleRepeat = useCallback(() => {
     if (!isRepeating && currentCaptionIndex !== -1) {
+      // Enable repeat mode for current caption
       setIsRepeating(true);
       setRepeatSegment(captions[currentCaptionIndex]);
       repeatSegmentIndexRef.current = currentCaptionIndex;
     } else {
+      // Disable repeat mode
       setIsRepeating(false);
       setRepeatSegment(null);
       repeatSegmentIndexRef.current = -1;
     }
-  };
+  }, [isRepeating, currentCaptionIndex, captions]);
 
-  // Toggle auto scroll
-  const toggleAutoScroll = () => {
-    setAutoScroll(!autoScroll);
-  };
+  // Toggle auto-scroll feature
+  const toggleAutoScroll = useCallback(() => {
+    setAutoScroll(prev => !prev);
+  }, []);
 
-  // Cleanup intervals when component unmounts
+  // Toggle language selection
+  const toggleLanguage = useCallback((type, language) => {
+    setSelectedLanguages(prev => ({
+      ...prev,
+      [type]: language
+    }));
+  }, []);
+
+  // Add keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (!playerRef.current) return;
+      
+      switch (e.key) {
+        case ' ': // Space bar
+          if (playerRef.current.getPlayerState() === YouTube.PlayerState.PLAYING) {
+            playerRef.current.pauseVideo();
+          } else {
+            playerRef.current.playVideo();
+          }
+          e.preventDefault();
+          break;
+        case 'r': // 'r' key for repeat
+          toggleRepeat();
+          break;
+        case 's': // 's' key for scrolling
+          toggleAutoScroll();
+          break;
+        default:
+          break;
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyPress);
+    return () => document.removeEventListener('keydown', handleKeyPress);
+  }, [toggleRepeat, toggleAutoScroll]);
+
+  // Cleanup on component unmount
   useEffect(() => {
     return () => {
+      // Clear all intervals and timeouts
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
+      
+      // Reset refs
+      playerRef.current = null;
+      repeatSegmentIndexRef.current = -1;
     };
   }, []);
+
+  // Get available languages from captions data
+  const availableLanguages = useMemo(() => {
+    if (!captions.length) return ['english', 'vietnamese'];
+    
+    // Get all unique language keys from the first caption
+    return Object.keys(captions[0]).filter(key => 
+      typeof captions[0][key] === 'string' && 
+      key !== 'start' && 
+      key !== 'duration'
+    );
+  }, [captions]);
 
   return (
     <div className="container">
       <div className="input-section">
         <h1>Trình phát YouTube với phụ đề song ngữ</h1>
-        <input
-          type="text"
-          value={videoUrl}
-          onChange={handleUrlChange}
-          placeholder="Nhập URL video YouTube"
-          className="url-input"
-        />
-        <button 
-          onClick={getTranscript} 
-          disabled={isLoading || !videoId}
-          className="submit-button"
-        >
-          {isLoading ? "Đang tải..." : "Lấy phụ đề"}
-        </button>
+        <div className="input-group">
+          <input
+            type="text"
+            value={videoUrl}
+            onChange={handleUrlChange}
+            placeholder="Nhập URL video YouTube"
+            className="url-input"
+          />
+          <button 
+            onClick={getCaptions} 
+            disabled={isLoading || !videoId}
+            className="submit-button"
+          >
+            {isLoading ? "Đang tải..." : "Lấy phụ đề"}
+          </button>
+        </div>
       </div>
 
       <div className="content">
-        {/* Luôn hiển thị video section, ẩn chỉ nội dung bên trong */}
+        {/* Video section */}
         <div className="video-section">
           <h2>Video</h2>
           
@@ -310,19 +394,21 @@ const App = () => {
                 <button 
                   onClick={toggleRepeat} 
                   className={`control-button ${isRepeating ? 'active' : ''}`}
+                  title="Phím tắt: R"
                 >
                   {isRepeating ? "Tắt lặp lại" : "Bật lặp lại"} 
                 </button>
                 <button 
                   onClick={toggleAutoScroll} 
                   className={`control-button ${autoScroll ? 'active' : ''}`}
+                  title="Phím tắt: S"
                 >
                   {autoScroll ? "Tắt tự động cuộn" : "Bật tự động cuộn"}
                 </button>
               </div>
               {isRepeating && repeatSegment && (
                 <div className="repeat-info">
-                  Đang lặp lại: "{repeatSegment.english}"
+                  Đang lặp lại: "{repeatSegment[selectedLanguages.primary]}"
                 </div>
               )}
             </div>
@@ -334,7 +420,40 @@ const App = () => {
         </div>
 
         <div className="captions-section">
-          <h2>Phụ đề</h2>
+          
+          <div className="language-controls">
+            <h2 className="caption-title">Phụ đề</h2>
+            {captions.length > 0 && (
+              <>
+                <div className="language-selector">
+                  <label>Ngôn ngữ chính:</label>
+                  <select 
+                    value={selectedLanguages.primary}
+                    onChange={(e) => toggleLanguage('primary', e.target.value)}
+                  >
+                    {availableLanguages.map(lang => (
+                      <option key={`primary-${lang}`} value={lang}>
+                        {lang.charAt(0).toUpperCase() + lang.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="language-selector">
+                  <label>Ngôn ngữ phụ:</label>
+                  <select 
+                    value={selectedLanguages.secondary}
+                    onChange={(e) => toggleLanguage('secondary', e.target.value)}
+                  >
+                    {availableLanguages.map(lang => (
+                      <option key={`secondary-${lang}`} value={lang}>
+                        {lang.charAt(0).toUpperCase() + lang.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
           
           {isLoading ? (
             <div className="loading-indicator">
@@ -364,11 +483,8 @@ const App = () => {
                   className={`caption ${index === currentCaptionIndex ? "active" : ""}`}
                   onClick={() => handleCaptionClick(caption, index)}
                 >
-                  <div className="caption-header">
-                    <span className="caption-time">{formatTime(caption.start)}</span>
-                  </div>
-                  <p className="caption-english">{caption.english}</p>
-                  <p className="caption-vietnamese">{caption.vietnamese}</p>
+                  <p className="caption-primary">{caption[selectedLanguages.primary]}</p>
+                  <p className="caption-secondary">{caption[selectedLanguages.secondary]}</p>
                 </Element>
               ))}
             </Element>
