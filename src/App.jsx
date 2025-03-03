@@ -3,8 +3,7 @@ import YouTube from "react-youtube";
 import { scroller, Element } from "react-scroll";
 import "./App.css";
 
-// const BACKEND_URL = "http://localhost:8000";
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
+const BACKEND_URL = "http://localhost:8000";
 
 const App = () => {
   // State management
@@ -23,6 +22,7 @@ const App = () => {
     primary: 'english',
     secondary: 'vietnamese'
   });
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
   
   // Refs
   const playerRef = useRef(null);
@@ -31,6 +31,7 @@ const App = () => {
   const scrollTimeoutRef = useRef(null);
   const captionsContainerRef = useRef(null);
   const repeatSegmentIndexRef = useRef(-1);
+  const repeatIntervalRef = useRef(null);
 
   // Extract video ID from URL
   const extractVideoId = (url) => {
@@ -52,6 +53,16 @@ const App = () => {
     setVideoId(id);
   };
 
+  // Format time for display (seconds to MM:SS.MS)
+  const formatTime = (seconds) => {
+    const totalSeconds = Math.floor(seconds);
+    const minutes = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const ms = Math.floor((seconds - totalSeconds) * 10);
+    
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`;
+  };
+
   // Fetch captions from backend API
   const getCaptions = async () => {
     if (!videoId) {
@@ -65,6 +76,12 @@ const App = () => {
     setIsRepeating(false);
     setRepeatSegment(null);
     repeatSegmentIndexRef.current = -1;
+    
+    // Clear any existing repeat interval
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
     
     try {
       // Updated to match your backend structure - using /captions endpoint
@@ -113,27 +130,19 @@ const App = () => {
     }, 100);
   };
 
-  // Handle player state changes
-  const onStateChange = (event) => {
-    if (event.data === YouTube.PlayerState.PAUSED && isRepeating && repeatSegment) {
-      // Small delay to check if pause was intentional
-      setTimeout(() => {
-        if (!playerRef.current) return;
-        
-        if (playerRef.current.getPlayerState() === YouTube.PlayerState.PAUSED) {
-          // User intentionally paused, so disable repeat
-          setIsRepeating(false);
-          repeatSegmentIndexRef.current = -1;
-          setRepeatSegment(null);
-        } else {
-          // Auto-pause from repeat, so continue repeating
-          playerRef.current.seekTo(repeatSegment.start, true);
-          playerRef.current.playVideo();
-        }
-      }, 300);
-    }
-  };
-  
+  // Toggle language selection
+  const toggleLanguage = useCallback((type, language) => {
+    setSelectedLanguages(prev => ({
+      ...prev,
+      [type]: language
+    }));
+  }, []);
+
+  // Toggle auto-scroll feature
+  const toggleAutoScroll = useCallback(() => {
+    setAutoScroll(prev => !prev);
+  }, []);
+
   // Enhanced scroll to caption
   const scrollToActiveCaption = useCallback((index) => {
     if (index < 0 || !autoScroll || userScrolling) return;
@@ -156,46 +165,129 @@ const App = () => {
     });
   }, [autoScroll, userScrolling, isRepeating]);
 
-  // Update current caption based on video time
-  useEffect(() => {
-    if (!captions.length || isSeekingRef.current || !playerRef.current) return;
+  // Move to next segment
+  const moveToNextSegment = useCallback(() => {
+    if (!playerRef.current || currentCaptionIndex < 0 || currentCaptionIndex >= captions.length - 1) {
+      return;
+    }
 
-    const index = captions.findIndex(
-      (caption) =>
-        currentTime >= caption.start &&
-        currentTime < caption.start + caption.duration
+    const nextIndex = currentCaptionIndex + 1;
+    console.log("Moving to next segment:", nextIndex);
+    
+    // Directly jump to the next segment
+    playerRef.current.seekTo(captions[nextIndex].start, true);
+    setCurrentCaptionIndex(nextIndex);
+    repeatSegmentIndexRef.current = nextIndex;
+    setRepeatSegment(captions[nextIndex]);
+    
+    // Maintain repeat mode for the new segment
+    if (isRepeating) {
+      setIsRepeating(true);
+    }
+  }, [captions, currentCaptionIndex, isRepeating]);
+
+  // Toggle repeat mode
+  const toggleRepeat = useCallback(() => {
+    // Clear any existing repeat interval
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+    
+    if (!isRepeating && currentCaptionIndex !== -1) {
+      // Enable regular repeat mode for current caption
+      setIsRepeating(true);
+      setRepeatSegment(captions[currentCaptionIndex]);
+      repeatSegmentIndexRef.current = currentCaptionIndex;
+    } else {
+      // Disable regular repeat mode
+      setIsRepeating(false);
+      setRepeatSegment(null);
+      repeatSegmentIndexRef.current = -1;
+    }
+  }, [isRepeating, currentCaptionIndex, captions]);
+
+  // Handle caption click for regular repeat mode
+  const handleCaptionClick = useCallback((caption, index) => {
+    if (!playerRef.current) return;
+    
+    isSeekingRef.current = true;
+    
+    // Clear any existing repeat interval
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+    
+    // Disable any existing repeat modes
+    setIsRepeating(false);
+    
+    // Enable repeating for this segment
+    setIsRepeating(true);
+    setRepeatSegment(caption);
+    setCurrentCaptionIndex(index);
+    repeatSegmentIndexRef.current = index;
+    
+    // Seek to the beginning of the segment
+    playerRef.current.seekTo(caption.start, true);
+    playerRef.current.playVideo();
+    
+    // Scroll to the selected segment if auto-scroll is enabled
+    if (autoScroll) {
+      scrollToActiveCaption(index);
+    }
+    
+    // Reset seeking flag after a short delay
+    setTimeout(() => {
+      isSeekingRef.current = false;
+    }, 300);
+  }, [playerRef, autoScroll, scrollToActiveCaption]);
+
+  // Get available languages from captions data
+  const availableLanguages = useMemo(() => {
+    if (!captions.length) return ['english', 'vietnamese'];
+    
+    // Get all unique language keys from the first caption
+    return Object.keys(captions[0]).filter(key => 
+      typeof captions[0][key] === 'string' && 
+      key !== 'start' && 
+      key !== 'duration'
     );
+  }, [captions]);
 
-    // Update current caption based on time
-    if (index !== -1 && index !== currentCaptionIndex) {
-      // Only update if not in repeat mode or if in repeat mode and this is the repeating segment
-      if (!isRepeating || (isRepeating && index === repeatSegmentIndexRef.current)) {
-        setCurrentCaptionIndex(index);
+  const handleLesson = (url) => {
+    setVideoUrl(url);
+    const id = extractVideoId(url);
+    setVideoId(id);
+    getCaptions();
+  }
+
+  // Handle player state changes
+  const onStateChange = (event) => {
+    if (event.data === YouTube.PlayerState.PAUSED && (isRepeating && repeatSegment)) {
+      // Small delay to check if pause was intentional
+      setTimeout(() => {
+        if (!playerRef.current) return;
         
-        if (autoScroll && !userScrolling) {
-          scrollToActiveCaption(index);
+        if (playerRef.current.getPlayerState() === YouTube.PlayerState.PAUSED) {
+          // User intentionally paused, so disable repeat
+          setIsRepeating(false);
+          repeatSegmentIndexRef.current = -1;
+          setRepeatSegment(null);
+          
+          // Clear repeat interval
+          if (repeatIntervalRef.current) {
+            clearInterval(repeatIntervalRef.current);
+            repeatIntervalRef.current = null;
+          }
+        } else {
+          // Auto-pause from repeat, so continue repeating
+          playerRef.current.seekTo(repeatSegment.start, true);
+          playerRef.current.playVideo();
         }
-      }
+      }, 300);
     }
-
-    // Handle repeating logic
-    if (isRepeating && repeatSegment) {
-      const repeatEnd = repeatSegment.start + repeatSegment.duration;
-      // Add a small buffer (0.1s) to prevent edge case issues
-      if (currentTime >= repeatEnd - 0.1) {
-        playerRef.current.seekTo(repeatSegment.start, true);
-      }
-    }
-  }, [
-    currentTime, 
-    captions, 
-    currentCaptionIndex, 
-    isRepeating, 
-    repeatSegment, 
-    autoScroll, 
-    userScrolling, 
-    scrollToActiveCaption
-  ]);
+  };
 
   // Detect user scrolling to pause auto-scroll
   useEffect(() => {
@@ -225,75 +317,20 @@ const App = () => {
     };
   }, []);
 
-  // Handle caption click to enable repeating mode
-  const handleCaptionClick = useCallback((caption, index) => {
-    if (!playerRef.current) return;
-    
-    isSeekingRef.current = true;
-    
-    // Enable repeating for this segment
-    setIsRepeating(true);
-    setRepeatSegment(caption);
-    setCurrentCaptionIndex(index);
-    repeatSegmentIndexRef.current = index;
-    
-    // Seek to the beginning of the segment
-    playerRef.current.seekTo(caption.start, true);
-    playerRef.current.playVideo();
-    
-    // Scroll to the selected segment if auto-scroll is enabled
-    if (autoScroll) {
-      scrollToActiveCaption(index);
-    }
-    
-    // Reset seeking flag after a short delay
-    setTimeout(() => {
-      isSeekingRef.current = false;
-    }, 300);
-  }, [playerRef, autoScroll, scrollToActiveCaption]);
-
-  // Format time for display (seconds to MM:SS.MS)
-  const formatTime = (seconds) => {
-    const totalSeconds = Math.floor(seconds);
-    const minutes = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    const ms = Math.floor((seconds - totalSeconds) * 10);
-    
-    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`;
-  };
-
-  // Toggle repeat mode
-  const toggleRepeat = useCallback(() => {
-    if (!isRepeating && currentCaptionIndex !== -1) {
-      // Enable repeat mode for current caption
-      setIsRepeating(true);
-      setRepeatSegment(captions[currentCaptionIndex]);
-      repeatSegmentIndexRef.current = currentCaptionIndex;
-    } else {
-      // Disable repeat mode
-      setIsRepeating(false);
-      setRepeatSegment(null);
-      repeatSegmentIndexRef.current = -1;
-    }
-  }, [isRepeating, currentCaptionIndex, captions]);
-
-  // Toggle auto-scroll feature
-  const toggleAutoScroll = useCallback(() => {
-    setAutoScroll(prev => !prev);
-  }, []);
-
-  // Toggle language selection
-  const toggleLanguage = useCallback((type, language) => {
-    setSelectedLanguages(prev => ({
-      ...prev,
-      [type]: language
-    }));
-  }, []);
-
-  // Add keyboard shortcuts
+  // Add keyboard shortcuts and Ctrl key detection
   useEffect(() => {
-    const handleKeyPress = (e) => {
+    const handleKeyDown = (e) => {
       if (!playerRef.current) return;
+      
+      // Detect Ctrl key press
+      if (e.key === 'Control') {
+        setIsCtrlPressed(true);
+        
+        // If in repeat mode, move to next segment when Ctrl is pressed
+        if (isRepeating && repeatSegment) {
+          moveToNextSegment();
+        }
+      }
       
       switch (e.key) {
         case ' ': // Space bar
@@ -315,9 +352,64 @@ const App = () => {
       }
     };
     
-    document.addEventListener('keydown', handleKeyPress);
-    return () => document.removeEventListener('keydown', handleKeyPress);
-  }, [toggleRepeat, toggleAutoScroll]);
+    const handleKeyUp = (e) => {
+      // Detect Ctrl key release
+      if (e.key === 'Control') {
+        setIsCtrlPressed(false);
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [toggleRepeat, toggleAutoScroll, isRepeating, repeatSegment, moveToNextSegment]);
+
+  // Update current caption based on video time
+  useEffect(() => {
+    if (!captions.length || isSeekingRef.current || !playerRef.current) return;
+
+    const index = captions.findIndex(
+      (caption) =>
+        currentTime >= caption.start &&
+        currentTime < caption.start + caption.duration
+    );
+
+    // Update current caption based on time
+    if (index !== -1 && index !== currentCaptionIndex) {
+      // Only update if not in repeat mode or if in repeat mode and this is the repeating segment
+      if (!isRepeating || (isRepeating && index === repeatSegmentIndexRef.current)) {
+        setCurrentCaptionIndex(index);
+        
+        if (autoScroll && !userScrolling) {
+          scrollToActiveCaption(index);
+        }
+      }
+    }
+
+    // Handle regular infinite repeating logic
+    if (isRepeating && repeatSegment) {
+      const repeatEnd = repeatSegment.start + repeatSegment.duration;
+      
+      // Add a small buffer (0.1s) to prevent edge case issues
+      if (currentTime >= repeatEnd - 0.1) {
+        // Regular infinite repeating - just loop back
+        playerRef.current.seekTo(repeatSegment.start, true);
+      }
+    }
+  }, [
+    currentTime, 
+    captions, 
+    currentCaptionIndex, 
+    isRepeating,
+    repeatSegment, 
+    autoScroll, 
+    userScrolling, 
+    scrollToActiveCaption
+  ]);
 
   // Cleanup on component unmount
   useEffect(() => {
@@ -329,31 +421,15 @@ const App = () => {
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
+      if (repeatIntervalRef.current) {
+        clearInterval(repeatIntervalRef.current);
+      }
       
-      // Reset refs
+      // Reset refs and states
       playerRef.current = null;
       repeatSegmentIndexRef.current = -1;
     };
   }, []);
-
-  // Get available languages from captions data
-  const availableLanguages = useMemo(() => {
-    if (!captions.length) return ['english', 'vietnamese'];
-    
-    // Get all unique language keys from the first caption
-    return Object.keys(captions[0]).filter(key => 
-      typeof captions[0][key] === 'string' && 
-      key !== 'start' && 
-      key !== 'duration'
-    );
-  }, [captions]);
-
-  const handleLesson = (url) => {
-    setVideoUrl(url);
-    const id = extractVideoId(url);
-    setVideoId(id);
-    getCaptions();
-  }
 
   return (
     <div className="container">
@@ -392,20 +468,7 @@ const App = () => {
           
           {videoId ? (
             <div className="video-wrapper">
-              <YouTube
-                videoId={videoId}
-                onReady={onReady}
-                onStateChange={onStateChange}
-                opts={{ 
-                  playerVars: { 
-                    autoplay: 1, 
-                    controls: 1,
-                    modestbranding: 1,
-                    rel: 0
-                  } 
-                }}
-                className="youtube-player"
-              />
+
               <div className="player-controls">
                 <button 
                   onClick={toggleRepeat} 
@@ -422,9 +485,25 @@ const App = () => {
                   {autoScroll ? "Tắt tự động cuộn" : "Bật tự động cuộn"}
                 </button>
               </div>
+              
+              <YouTube
+                videoId={videoId}
+                onReady={onReady}
+                onStateChange={onStateChange}
+                opts={{ 
+                  playerVars: { 
+                    autoplay: 1, 
+                    controls: 1,
+                    modestbranding: 1,
+                    rel: 0
+                  } 
+                }}
+                className="youtube-player"
+              />
               {isRepeating && repeatSegment && (
                 <div className="repeat-info">
                   Đang lặp lại: "{repeatSegment[selectedLanguages.primary]}"
+                  <div><small>Nhấn Ctrl để chuyển sang câu tiếp theo</small></div>
                 </div>
               )}
             </div>
@@ -498,9 +577,12 @@ const App = () => {
                   key={index}
                   name={`caption-${index}`}
                   className={`caption ${index === currentCaptionIndex ? "active" : ""}`}
-                  onClick={() => handleCaptionClick(caption, index)}
                 >
-                  <p className="caption-primary">{caption[selectedLanguages.primary]}</p>
+                  <div className="caption-controls">
+                    <span onClick={() => handleCaptionClick(caption, index)}>
+                      {caption[selectedLanguages.primary]}
+                    </span>
+                  </div>
                   <p className="caption-secondary">{caption[selectedLanguages.secondary]}</p>
                 </Element>
               ))}
